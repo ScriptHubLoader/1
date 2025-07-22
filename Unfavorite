@@ -1,0 +1,70 @@
+--[[
+    Script: Auto Unfavorite Pets
+
+    This script scans the local player's Backpack for items that have an
+    attribute named "d". If this attribute is found and its value is 'true',
+    the script will fire a 'Favorite_Item' RemoteEvent with the backpack item
+    (the Tool instance) itself as the argument.
+    This is typically used to "unfavorite" items by calling a server-side event.
+
+    It assumes:
+    -   This script is run as a LocalScript in a Roblox game.
+    -   Backpack items representing pets have a 'PET_UUID' attribute (for logging/identification).
+    -   'GameEvents' in 'ReplicatedStorage' contains a 'Favorite_Item' RemoteEvent.
+    -   The 'Favorite_Item' RemoteEvent on the server expects the backpack item (Tool) instance as an argument.
+]]
+
+-- Access necessary services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- local Workspace = game:GetService("Workspace") -- Workspace is no longer needed for this script
+
+-- Get the local player
+local LocalPlayer = Players.LocalPlayer
+
+-- Wait for the Favorite_Item RemoteEvent
+local Favorite_Item_Event = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("Favorite_Item")
+
+-- Function to process backpack items for "d" attribute (Auto Unfavorite Pets logic)
+local function processAutoUnfavoritePets()
+    print("--- Starting Auto Unfavorite Pets processing ---")
+    if not LocalPlayer then
+        warn("LocalPlayer not found. This script must be run from a LocalScript.")
+        return
+    end
+
+    local Backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not Backpack then
+        warn("LocalPlayer's Backpack not found for auto unfavorite. Skipping.")
+        return
+    end
+
+    local unfavoritedCount = 0
+    -- Iterate through all children (items) in the Backpack
+    for _, item in ipairs(Backpack:GetChildren()) do
+        -- Check if the item has an attribute named "d"
+        local dAttribute = item:GetAttribute("d")
+
+        if dAttribute == true then -- If the attribute 'd' exists and is true
+            local petUUID = item:GetAttribute("PET_UUID") -- Get UUID from backpack item for logging
+
+            -- Fire the Favorite_Item RemoteEvent with the backpack item itself
+            local args = { item } -- Pass the backpack item (Tool) directly
+            local success, err = pcall(function()
+                Favorite_Item_Event:FireServer(unpack(args))
+            end)
+            if success then
+                print("Fired Favorite_Item for backpack item '" .. item.Name .. "' (PET_UUID: " .. tostring(petUUID) .. ") to unfavorite.")
+                unfavoritedCount = unfavoritedCount + 1 -- Still count as unfavorited action
+            else
+                warn("Failed to fire Favorite_Item for backpack item '" .. item.Name .. "': " .. tostring(err))
+            end
+        -- else
+            -- print("Item '" .. item.Name .. "' does not have attribute 'd' or it's not true.")
+        end
+    end
+    print("--- Finished Auto Unfavorite Pets processing. Unfavorited " .. unfavoritedCount .. " pets. ---")
+end
+
+-- Execute the unfavorite function
+processAutoUnfavoritePets()
