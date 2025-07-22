@@ -1,0 +1,56 @@
+--[[
+    Script: Unequip Pets from PetMover
+
+    This script is designed to unequip all pets found in 'Workspace.PetsPhysical'.
+    It iterates through each pet model in this container, retrieves its UUID attribute,
+    and then fires a RemoteEvent via 'PetsService' to instruct the server to unequip it.
+
+    It assumes:
+    -   Physical pet models in 'Workspace.PetsPhysical' have a 'UUID' attribute directly on the model.
+    -   'PetsService' handles 'UnequipPet' RemoteEvents.
+    -   This script is run as a LocalScript in a Roblox game.
+]]
+
+-- Access necessary services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+-- Wait for necessary RemoteEvents early to ensure they are available
+local PetsService = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("PetsService")
+
+-- Function to process pets in Workspace.PetsPhysical (unequip them)
+local function unequipPetsFromPhysical()
+    print("--- Starting PetsPhysical processing (unequipping) ---")
+    local PetsPhysicalContainer = Workspace:FindFirstChild("PetsPhysical")
+
+    if not PetsPhysicalContainer then
+        warn("Workspace.PetsPhysical not found. Skipping physical pet processing.")
+        return
+    end
+
+    local petsUnequippedCount = 0
+    -- Iterate through all children (pet models) in the PetsPhysical container
+    for _, petModel in ipairs(PetsPhysicalContainer:GetChildren()) do
+        -- Assuming the UUID is stored as an attribute directly on the pet model
+        local petUUID = petModel:GetAttribute("UUID")
+
+        if petUUID and type(petUUID) == "string" and petUUID ~= "" then
+            local success, err = pcall(function()
+                -- Fire the UnequipPet RemoteEvent via PetsService
+                PetsService:FireServer("UnequipPet", petUUID)
+            end)
+            if success then
+                print("Fired UnequipPet for physical pet: " .. petModel.Name .. " (UUID: " .. petUUID .. ")")
+                petsUnequippedCount = petsUnequippedCount + 1
+            else
+                warn("Failed to unequip physical pet '" .. petModel.Name .. "': " .. tostring(err))
+            end
+        else
+            warn("Physical pet model '" .. petModel.Name .. "' does not have a valid 'UUID' attribute. Skipping unequip.")
+        end
+    end
+    print("--- Finished PetsPhysical processing. Unequipped " .. petsUnequippedCount .. " pets. ---")
+end
+
+-- Execute the unequip function
+unequipPetsFromPhysical()
